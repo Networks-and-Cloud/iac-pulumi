@@ -1,6 +1,10 @@
 {
-    "name": "QuickStart",
-    "main": "index.js",
+    "name": "Quickstart",
+    "main": "index.ts",
+    "type": "module",
+    "devDependencies": {
+        "@types/node": "^16"
+    },
     "dependencies": {
         "@pulumi/pulumi": "^3.0.0",
         "@pulumi/aws": "^5.0.0",
