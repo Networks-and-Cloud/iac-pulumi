@@ -1,0 +1,5 @@
+config:
+  aws:profile: root
+  aws:region: us-east-1
+  app:VPCCidrBlock: 10.0.0.0/16
+  app:destinationCidrBlock: 0.0.0.0/0
