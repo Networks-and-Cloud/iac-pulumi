@@ -87,7 +87,6 @@ console.log (vpc.id)
     gatewayId: ig.id,
   });
 
-
   const Ec2SecurityGroup= new aws.ec2.SecurityGroup("webAppSecurityGroup",{
     vpcId:vpc.id,
     ingress:[

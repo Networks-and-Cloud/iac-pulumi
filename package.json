@@ -1,6 +1,6 @@
 {
     "name": "Quickstart",
-    "main": "index.ts",
+    "main": "index.js",
     "type": "module",
     "devDependencies": {
         "@types/node": "^16"
@@ -11,5 +11,6 @@
         "@pulumi/pulumi": "^3.0.0",
         "ip": "^1.1.8",
         "subnet-cidr-calculator": "^1.0.12"
+
     }
 }
