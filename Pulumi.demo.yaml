@@ -3,3 +3,4 @@ config:
   aws:profile: demo
   webApp:cidrBlock: 10.0.0.0/16
   webApp:destinationCidrBlock: 0.0.0.0/0
+  webApp:keyPairName: vidish_key_app
