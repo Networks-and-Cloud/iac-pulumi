@@ -1,3 +1,5 @@
+/*
+
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
 
@@ -234,6 +236,8 @@ const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance",{
 
 
 });
-
 // Export VPC ID
 export const vpcId = vpc.id;
+
+
+*/
