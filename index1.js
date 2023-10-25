@@ -1,3 +1,5 @@
+/*
+
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
 
@@ -86,6 +88,7 @@ console.log (vpc.id)
     destinationCidrBlock: webAppConfig.get("destinationCidrBlock"),
     gatewayId: ig.id,
   });
+
 
   const Ec2SecurityGroup= new aws.ec2.SecurityGroup("webAppSecurityGroup",{
     vpcId:vpc.id,
@@ -233,6 +236,8 @@ const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance",{
 
 
 });
-
 // Export VPC ID
 export const vpcId = vpc.id;
+
+
+*/
