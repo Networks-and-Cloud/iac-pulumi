@@ -199,6 +199,7 @@ const dbInstance = new aws.rds.Instance("db-instance", {
 
 const DB_HOST = pulumi.interpolate`${dbInstance.endpoint}`; 
 const userData = pulumi.interpolate`#!/bin/bash
+
 # Define the path to the .env file
 envFile="/home/admin/webapp/.env"
  
@@ -220,12 +221,14 @@ sudo chown -R csye6225:csye6225 /home/admin/webapp/
 sudo chmod -R 755 /home/admin/webapp/
 sudo systemctl enable unit
 sudo systemctl start unit`
+
 // EC2 instance 
 const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance",{
    // DependsOn:[dbInstance],
     instanceType: "t2.micro", // creating the ec2 instance
     vpcSecurityGroupIds: [Ec2SecurityGroup.id],
     ami: "ami-06db4d78cb1d3bbf9",
+
     subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
     associatePublicIpAddress: true,
     rootBlockDevice: {
