@@ -222,13 +222,13 @@ fi
  
 # Create the .env file
 sudo touch "$envFile"
+
 echo "MYSQL_DB='${dbInstance.dbName}'" | sudo tee -a "$envFile"
 echo "MYSQL_HOST='${DB_HOST}'" | sudo tee -a "$envFile"
 echo "MYSQL_USER='${dbInstance.username}'" | sudo tee -a "$envFile"
 echo "MYSQL_PASSWORD ='${dbInstance.password}'" | sudo tee -a "$envFile"
 echo "MYSQL_PORT='3306'" | sudo tee -a "$envFile"
 echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"`;
-
 
 // EC2 instance 
     const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance", {
@@ -240,6 +240,7 @@ echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"`;
       subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
       associatePublicIpAddress: true,
       rootBlockDevice: {
+
       volumeSize: 25,
       volumeType: "gp2",
       deleteOnTermination: true,
