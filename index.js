@@ -235,8 +235,8 @@ echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"`;
       instanceType: "t2.micro", // creating the ec2 instance
       vpcSecurityGroupIds: [Ec2SecurityGroup.id],
       
-      ami: "ami-0306fc5041ea82cf1",
-
+  //    ami: "ami-0306fc5041ea82cf1",
+      ami: "ami-0de928fbd7cb11826",
       subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
       associatePublicIpAddress: true,
       rootBlockDevice: {
