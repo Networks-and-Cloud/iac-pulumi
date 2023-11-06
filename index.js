@@ -2,8 +2,10 @@ import * as aws from "@pulumi/aws";
 //import { RdsDbInstance } from "@pulumi/aws/opsworks";
 import * as pulumi from "@pulumi/pulumi";
 
-const webAppConfig=  new pulumi.Config("webApp");
 
+const webAppConfig=  new pulumi.Config("webApp");
+const db_dialect = new pulumi.Config("db_dialect");
+const mysql_port = new pulumi.Config("mysql_port");
 // Create a new VPC
 const vpc = new aws.ec2.Vpc("webappVPC", {
   cidrBlock:webAppConfig.get("cidrBlock") ,
@@ -115,7 +117,16 @@ console.log (vpc.id)
         toPort: 443,
         cidrBlocks: ["0.0.0.0/0"],
       },
-    ]
+    ],
+    egress: [
+      {
+          protocol: "-1", // -1 means all protocols
+          fromPort: 0,
+          toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
+          cidrBlocks: ["0.0.0.0/0"],
+      },
+  ],
+
   });
 
  
@@ -188,7 +199,7 @@ const dbInstance = new aws.rds.Instance("db-instance", {
   multiAz: false,
   dbInstanceIdentifier: "csye6225",
   username: "csye6225",
-  password: new pulumi.secret("vidish11"),
+  password: new pulumi.secret("Vidish111"),
  
   publiclyAccessible: false,
   dbName: "csye6225",
@@ -196,13 +207,12 @@ const dbInstance = new aws.rds.Instance("db-instance", {
   vpcSecurityGroupIds: [ dbSecurityGroup.id ]
 
 });
-
-const DB_HOST = pulumi.interpolate`${dbInstance.endpoint}`; 
+  
+const DB_HOST = pulumi.interpolate`${dbInstance.address}`; 
 const userData = pulumi.interpolate`#!/bin/bash
-
  
 # Define the path to the .env file
-envFile="/home/admin/webapp/.env"
+envFile="/opt/csye6225/webapp/.env"
  
 # Check if the .env file exists
 if [ -e "$envFile" ]; then
@@ -212,31 +222,25 @@ fi
  
 # Create the .env file
 sudo touch "$envFile"
-echo "DB_NAME=${dbInstance.dbName}" | sudo tee -a "$envFile"
-echo "DB_HOST=${DB_HOST}" | sudo tee -a "$envFile"
-echo "DB_USERNAME=${dbInstance.username}" | sudo tee -a "$envFile"
-echo "DB_PASSWORD=${dbInstance.password}" | sudo tee -a "$envFile"
-echo "PORT=3306" | sudo tee -a "$envFile"
-echo "DB_Dailect=${dbInstance.engine}" | sudo tee -a "$envFile"
-sudo chown -R csye6225:csye6225 /home/admin/webapp/
-sudo chmod -R 755 /home/admin/webapp/
-sudo systemctl enable unit
-sudo systemctl start unit`
 
-
+echo "MYSQL_DB='${dbInstance.dbName}'" | sudo tee -a "$envFile"
+echo "MYSQL_HOST='${DB_HOST}'" | sudo tee -a "$envFile"
+echo "MYSQL_USER='${dbInstance.username}'" | sudo tee -a "$envFile"
+echo "MYSQL_PASSWORD ='${dbInstance.password}'" | sudo tee -a "$envFile"
+echo "MYSQL_PORT='3306'" | sudo tee -a "$envFile"
+echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"`;
 
 // EC2 instance 
-const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance",{
-   // DependsOn:[dbInstance],
-    instanceType: "t2.micro", // creating the ec2 instance
-    vpcSecurityGroupIds: [Ec2SecurityGroup.id],
+    const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance", {
+      instanceType: "t2.micro", // creating the ec2 instance
+      vpcSecurityGroupIds: [Ec2SecurityGroup.id],
+      
+  //    ami: "ami-0306fc5041ea82cf1",
+      ami: "ami-0de928fbd7cb11826",
+      subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
+      associatePublicIpAddress: true,
+      rootBlockDevice: {
 
-    ami: "ami-06db4d78cb1d3bbf9",
-
-
-    subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
-    associatePublicIpAddress: true,
-    rootBlockDevice: {
       volumeSize: 25,
       volumeType: "gp2",
       deleteOnTermination: true,
