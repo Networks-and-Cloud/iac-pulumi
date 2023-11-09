@@ -2,7 +2,6 @@ import * as aws from "@pulumi/aws";
 //import { RdsDbInstance } from "@pulumi/aws/opsworks";
 import * as pulumi from "@pulumi/pulumi";
 
-
 const webAppConfig=  new pulumi.Config("webApp");
 const db_dialect = new pulumi.Config("db_dialect");
 const mysql_port = new pulumi.Config("mysql_port");
@@ -90,7 +89,7 @@ console.log (vpc.id)
     gatewayId: ig.id,
   });
 
-  const Ec2SecurityGroup= new aws.ec2.SecurityGroup("webAppSecurityGroup",{
+  const EC2SGroup = new aws.ec2.SecurityGroup("webAppSecurityGroup",{
     vpcId:vpc.id,
     ingress:[
       {
@@ -125,6 +124,12 @@ console.log (vpc.id)
           toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
           cidrBlocks: ["0.0.0.0/0"],
       },
+      {
+        protocol: "TCP", // -1 means all protocols
+        fromPort: 443,
+        toPort: 443, // Set both fromPort and toPort to 0 to allow all ports
+        cidrBlocks: ["0.0.0.0/0"],
+    },
   ],
 
   });
@@ -155,7 +160,7 @@ db_ingressRules.forEach((rule, index) => {
     fromPort: rule.fromPort,
     toPort: rule.toPort,
     protocol: rule.protocol,
-    sourceSecurityGroupId: Ec2SecurityGroup.id,
+    sourceSecurityGroupId: EC2SGroup.id,
     securityGroupId: dbSecurityGroup.id,
     //vpcId: vpc.id
     vpcId:vpc.id,
@@ -228,15 +233,71 @@ echo "MYSQL_HOST='${DB_HOST}'" | sudo tee -a "$envFile"
 echo "MYSQL_USER='${dbInstance.username}'" | sudo tee -a "$envFile"
 echo "MYSQL_PASSWORD ='${dbInstance.password}'" | sudo tee -a "$envFile"
 echo "MYSQL_PORT='3306'" | sudo tee -a "$envFile"
-echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"`;
+echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-config.json -s
+sudo systemctl enable amazon-cloudwatch-agent
+sudo systemctl start amazon-cloudwatch-agent`;
+
+
+const hostedZoneName = "dev.networksturctures.pro"; // Replace with your actual domain name
+const aRecordName = "networkstructures.pro"; // Replace with your actual domain name
+
+const hostedZone = new aws.route53.Zone("hosted-zone", {
+    name: hostedZoneName,
+    comment: "Route 53 hosted zone for your domain",
+});
+
+
+// Create an IAM role
+const ec2Role = new aws.iam.Role("EC2Role", {
+    assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: {
+                Service: "ec2.amazonaws.com",
+            },
+        }],
+    }),
+});
+
+// Attach the CloudWatchAgentServerPolicy to the IAM role
+const cloudWatchAgentServerPolicyAttachment = new aws.iam.PolicyAttachment("CloudWatchAgentServerPolicyAttachment", {
+    policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+    roles: [ec2Role.name],
+});
+
+// Example of attaching additional policies if needed
+// const additionalPolicyAttachment = new aws.iam.PolicyAttachment("AdditionalPolicyAttachment", {
+//     policyArn: "arn:aws:iam::aws:policy/AdditionalPolicyName",
+//     roles: [ec2Role.name],
+// });
+
+// Create an instance profile and associate the IAM role with it
+const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
+    role: ec2Role.name,
+});
+
+
+
+// Export the IAM role name for future reference
+// export const ec2RoleName = ec2Role.name;
+
+
+
+
+// Export the IAM role name for use with EC2 instances
+// const cloudWatchAgentRoleName = cloudWatchAgentRole.name;
+
 
 // EC2 instance 
     const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance", {
-      instanceType: "t2.micro", // creating the ec2 instance
-      vpcSecurityGroupIds: [Ec2SecurityGroup.id],
-      
+    instanceType: "t2.micro", // creating the ec2 instance
+    vpcSecurityGroupIds: [EC2SGroup.id],     
   //    ami: "ami-0306fc5041ea82cf1",
-      ami: "ami-0de928fbd7cb11826",
+   //   ami: "ami-0de928fbd7cb11826",
+      ami: "ami-0248c05e71db9e318",
       subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
       associatePublicIpAddress: true,
       rootBlockDevice: {
@@ -253,10 +314,19 @@ echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"`;
     },
     userData:userData,
 
+    iamInstanceProfile : instanceProfile.name,
+
   })
 
+  const aRecord = new aws.route53.Record("a-record", {
+    name: "dev",
+    type: "A",
+    zoneId: hostedZone.zoneId,
+    records: [applicationEc2Instance.publicIp], 
+    ttl: 60, 
 
 });
 
-// Export VPC ID
-export const vpcId = vpc.id;
+});
+
+// export const vpcId = vpc.id;
