@@ -227,6 +227,7 @@ fi
  
 # Create the .env file
 sudo touch "$envFile"
+
 echo "MYSQL_DB='${dbInstance.dbName}'" | sudo tee -a "$envFile"
 echo "MYSQL_HOST='${DB_HOST}'" | sudo tee -a "$envFile"
 echo "MYSQL_USER='${dbInstance.username}'" | sudo tee -a "$envFile"
@@ -290,7 +291,6 @@ const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
 // const cloudWatchAgentRoleName = cloudWatchAgentRole.name;
 
 
-
 // EC2 instance 
     const applicationEc2Instance= new aws.ec2.Instance("appEC2Instance", {
     instanceType: "t2.micro", // creating the ec2 instance
@@ -301,6 +301,7 @@ const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
       subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
       associatePublicIpAddress: true,
       rootBlockDevice: {
+
       volumeSize: 25,
       volumeType: "gp2",
       deleteOnTermination: true,
