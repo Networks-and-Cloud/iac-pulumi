@@ -1,13 +1,14 @@
 import * as aws from "@pulumi/aws";
 //import { RdsDbInstance } from "@pulumi/aws/opsworks";
 import * as pulumi from "@pulumi/pulumi";
-
+const config= new pulumi.Config();
 const webAppConfig=  new pulumi.Config("webApp");
 const db_dialect = new pulumi.Config("db_dialect");
 const mysql_port = new pulumi.Config("mysql_port");
 // Create a new VPC
 const vpc = new aws.ec2.Vpc("webappVPC", {
-  cidrBlock:webAppConfig.get("cidrBlock") ,
+  cidrBlock:config.get("cidrBlock") 
+  
 });
 console.log (vpc.id)
 // Variable to hold subnet details
@@ -81,6 +82,10 @@ console.log (vpc.id)
       }
     );
   }
+
+    
+  
+
 
   // Create a public route
   const publicRoute = new aws.ec2.Route("webapp-publicRoute", {
@@ -234,18 +239,18 @@ echo "MYSQL_USER='${dbInstance.username}'" | sudo tee -a "$envFile"
 echo "MYSQL_PASSWORD ='${dbInstance.password}'" | sudo tee -a "$envFile"
 echo "MYSQL_PORT='3306'" | sudo tee -a "$envFile"
 echo "DB_DIALECT='mysql'" | sudo tee -a "$envFile"
-sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-config.json -s
-sudo systemctl enable amazon-cloudwatch-agent
-sudo systemctl start amazon-cloudwatch-agent`;
+"sudo chown -R csye6225:csye6225 /opt/aws/webapp"
+sudo systemctl enable unit
+sudo systemctl start unit
+sudo systemctl restart unit 
+
+`;
 
 
-const hostedZoneName = "dev.networksturctures.pro"; // Replace with your actual domain name
+const hostedZoneName = "dev.networksturcture.pro"; // Replace with your actual domain name
 const aRecordName = "networkstructures.pro"; // Replace with your actual domain name
 
-const hostedZone = new aws.route53.Zone("hosted-zone", {
-    name: hostedZoneName,
-    comment: "Route 53 hosted zone for your domain",
-});
+const zonePromise = aws.route53.getZone({ name: config.require('Arecord') }, { async: true });
 
 
 // Create an IAM role
@@ -297,7 +302,8 @@ const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
     vpcSecurityGroupIds: [EC2SGroup.id],     
   //    ami: "ami-0306fc5041ea82cf1",
    //   ami: "ami-0de928fbd7cb11826",
-      ami: "ami-0248c05e71db9e318",
+      //ami: "ami-0248c05e71db9e318",
+      ami:"ami-04baf520d3c9a874b",
       subnetId: subnetDetails[0].id, // Choosing the first subnet for the instance
       associatePublicIpAddress: true,
       rootBlockDevice: {
@@ -317,16 +323,19 @@ const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
     iamInstanceProfile : instanceProfile.name,
 
   })
-
+zonePromise.then(zone=>{
   const aRecord = new aws.route53.Record("a-record", {
-    name: "dev",
+    name: config.require('Arecord'),
     type: "A",
-    zoneId: hostedZone.zoneId,
+    zoneId: zone.zoneId,
     records: [applicationEc2Instance.publicIp], 
     ttl: 60, 
-
+    
+}, 
+   {dependsOn: [applicationEc2Instance]}
+);
 });
-
+  
 });
 
 // export const vpcId = vpc.id;

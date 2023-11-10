@@ -1,8 +1,9 @@
 config:
   aws:profile: dev
   aws:region: us-east-1
-  webApp:cidrBlock: 10.0.0.0/16
+  cidrBlock: 10.0.0.0/16
   webApp:destinationCidrBlock: 0.0.0.0/0
   webApp:keyPairName: vidish_key_app
   db_dialect: mysql
   mysql_port: 3306
+  Arecord: dev.networkstructures.pro
