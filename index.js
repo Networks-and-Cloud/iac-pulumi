@@ -1,273 +1,264 @@
 import * as aws from "@pulumi/aws";
 //import { RdsDbInstance } from "@pulumi/aws/opsworks";
 import * as pulumi from "@pulumi/pulumi";
-const config= new pulumi.Config();
-const webAppConfig=  new pulumi.Config("webApp");
+const config = new pulumi.Config();
+const webAppConfig = new pulumi.Config("webApp");
 const db_dialect = new pulumi.Config("db_dialect");
 const mysql_port = new pulumi.Config("mysql_port");
+//const mailgun_api_key = new pulumi.Config("mailgun_api_key");
+const mailgun_api_key = config.require("mailgun_api_key");
+//const domainName = new pulumi.Config("domainName");
+import * as gcp from "@pulumi/gcp";
 
 
 // Retrieve the value of keyName from pulumi.yaml
-const keyPairName = webAppConfig.get("keyName");
+const keyPairName = webAppConfig.get("keyPairName");
+const domainName = webAppConfig.get("Arecord");
 
-// Now you can use keyName in your code
 console.log(`The keyName is: ${keyPairName}`);
 
 // Create a new VPC
 const vpc = new aws.ec2.Vpc("webappVPC", {
-  cidrBlock:config.get("cidrBlock") 
-  
+  cidrBlock: config.get("cidrBlock"),
 });
-console.log (vpc.id)
-// Variable to hold subnet details
+console.log(vpc.id);
 
-aws.getAvailabilityZones({ state: "available" }).then((response) => { 
-const subnetDetails = [];
-const publicSubnetIds = [];
-const privateSubnetIds = [];
-console.log(response.names)
-  if (response.names.length > 2){
-console.log (vpc.id) 
-    const zones = response.names.slice(0, 3);
-
-    let priv_zone = true;
-
-    for (let i = 0; i < 6; i++) {
-        const subnet = new aws.ec2.Subnet(`subnet${i}`, {
-        vpcId: vpc.id,
-        cidrBlock: `10.0.${i}.0/24`,
-        availabilityZone: `${zones[Math.floor(i / 2)]}`,
-        tags: {
-            Name: `webapp-subnet${i}`,
-            Type: priv_zone ? "public" : "private",
-        },
-    
-        });
-        if (priv_zone) {
-          privateSubnetIds.push(subnet.id);
-          } else {
-          publicSubnetIds.push(subnet.id);
-          }
-
-        priv_zone=!priv_zone;
-        subnetDetails.push(subnet);
-    }
-
-  }else{
-    const zones = response.names.slice(0, 2);
-    for(let i = 0; i < 4; i++) {
-        const subnet = new aws.ec2.Subnet(`subnet${i}`, {
-        vpcId: vpc.id,
-        cidrBlock: `10.0.${i}.0/24`,
-        availabilityZone: `${ i < 2 ? zones[0]: zones[1]}`,
-        tags: {
-            Name: `webapp-subnet${i}`,
-            Type: [0,2].includes(i) ? "public" : "private",
-        },
-    
-        });
-        if ([1,3].includes[i]) {
-           privateSubnetIds.push(subnet.id);
-           } else {
-           publicSubnetIds.push(subnet.id);
-           }
-          priv_zone = ! priv_zone;
-      //     subnetDetails.push(subnet);
-
-        subnetDetails.push(subnet);
-    }
-  }
-  
 
   // Create an Internet Gateway and attach it to the VPC
   const ig = new aws.ec2.InternetGateway("webapp-ig", {
     vpcId: vpc.id,
   });
 
-  // Create the public route table
-  const publicRouteTable = new aws.ec2.RouteTable("webapp-publicRouteTable", {
-    vpcId: vpc.id,
+const publicSubnetsArray=[];
+const privateSubnetsArray=[];
+
+aws.getAvailabilityZones({ state: "available" }).then((response) => {
+  const allZones = response.names;
+
+  // Determine the number of subnets to create based on the number of availability zones
+  const numSubnetsToCreate = Math.min(3, allZones.length);
+
+  const selectedZones = allZones.slice(0, numSubnetsToCreate);
+
+  selectedZones.forEach((zone, i) => {
+      // Create public subnet
+      const publicSubnet = new aws.ec2.Subnet(`webapp-public-subnet-${i + 1}`, {
+          vpcId: vpc.id,
+          cidrBlock: `10.0.${i * 2}.0/24`,
+          availabilityZone: zone,
+          mapPublicIpOnLaunch: true,
+          tags: {
+              Name: `webapp-public-subnet-${i + 1}`,
+          },
+      });
+      publicSubnetsArray.push(publicSubnet);
+
+      // Create private subnet
+      const privateSubnet = new aws.ec2.Subnet(`webapp-private-subnet-${i + 1}`, {
+          vpcId: vpc.id,
+          cidrBlock: `10.0.${i * 2 + 1}.0/24`,
+          availabilityZone: zone,
+          tags: {
+              Name: `webapp-private-subnet-${i + 1}`,
+          },
+      });
+      privateSubnetsArray.push(privateSubnet);
   });
 
-  // Create the private route table
-  const privateRouteTable = new aws.ec2.RouteTable("webapp-privateRouteTable", {
-    vpcId: vpc.id,
+
+      
+  // Create route table
+  const publicrouteTable = new aws.ec2.RouteTable(`webapp-Public-routeTable`, {
+      vpcId: vpc.id,
+      });
+
+  const privateRouteTable = new aws.ec2.RouteTable("webapp-private-routeTable", {
+      vpcId: vpc.id,
+      });
+  
+  // Associate the public subnets with the public route table
+  privateSubnetsArray.forEach((subnet, i) => {
+      new aws.ec2.RouteTableAssociation(`private-association-${i}`, {
+          subnetId: subnet.id,
+          routeTableId: privateRouteTable.id,
+      });
+
   });
+              
+  // Associate the private subnets with the private route table
+  publicSubnetsArray.forEach((subnet, i) => {
+      new aws.ec2.RouteTableAssociation(`public-association-${i}`, {
+          subnetId: subnet.id,
+          routeTableId: publicrouteTable.id,
+      });
+  
+      // Create a public route in the public route table with the destination CIDR block 0.0.0.0/0 and the internet gateway
+      const publicRoute = new aws.ec2.Route(`publicRoute-${i}`, {
+          routeTableId: publicrouteTable.id,
+          destinationCidrBlock: "0.0.0.0/0",
+          gatewayId: ig.id,
+      });
+  });
+
 
   // Loop through the created subnets and add the public ones to the public route table and private ones to the private route table
-  for (let i = 0; i < subnetDetails.length; i++) {
-    const routeTableAssociation = new aws.ec2.RouteTableAssociation(
-      `webapp-routeTableAssociation${i}`,
-      {
-        subnetId: subnetDetails[i].id,
-        routeTableId: i %2 == 0 ? publicRouteTable.id : privateRouteTable.id,
-      }
-    );
-  }
-
-
-  // Create a public route
-  const publicRoute = new aws.ec2.Route("webapp-publicRoute", {
-    routeTableId: publicRouteTable.id,
-    destinationCidrBlock: webAppConfig.get("destinationCidrBlock"),
-    gatewayId: ig.id,
-  });
 
   // Create a security group for the load balancer
-const loadBalancerSecurityGroup = new aws.ec2.SecurityGroup("loadBalancerSecurityGroup", {
+  const loadBalancerSecurityGroup = new aws.ec2.SecurityGroup(
+    "loadBalancerSecurityGroup",
+    {
+      vpcId: vpc.id,
+      ingress: [
+        {
+          protocol: "tcp",
+          fromPort: 80,
+          toPort: 80,
+          cidrBlocks: ["0.0.0.0/0"], // Allow TCP traffic on port 80 from anywhere
+        },
+        {
+          protocol: "tcp",
+          fromPort: 443,
+          toPort: 443,
+          cidrBlocks: ["0.0.0.0/0"], // Allow TCP traffic on port 443 from anywhere
+        },
+      ],
+      egress: [
+        {
+          protocol: "-1", // -1 means all protocols
+          fromPort: 0,
+          toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
+          cidrBlocks: ["0.0.0.0/0"],
+        },
+      ],
+    }
+  );
+
+  const EC2SGroup = new aws.ec2.SecurityGroup("webAppSecurityGroup", {
     vpcId: vpc.id,
     ingress: [
-        {
-            protocol: "tcp",
-            fromPort: 80,
-            toPort: 80,
-            cidrBlocks: ["0.0.0.0/0"], // Allow TCP traffic on port 80 from anywhere
-        },
-        {
-            protocol: "tcp",
-            fromPort: 443,
-            toPort: 443,
-            cidrBlocks: ["0.0.0.0/0"], // Allow TCP traffic on port 443 from anywhere
-        },
-    ],
-    egress: [
-        {
-            protocol: "-1", // -1 means all protocols
-            fromPort: 0,
-            toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
-            cidrBlocks: ["0.0.0.0/0"],
-        }
-    ]
-  });
-
-  
-  const EC2SGroup = new aws.ec2.SecurityGroup("webAppSecurityGroup",{
-    vpcId:vpc.id,
-    ingress:[
       {
         protocol: "tcp",
         fromPort: 3000, // for web application port
         toPort: 3000,
-        securityGroups :[loadBalancerSecurityGroup.id],
-   //     cidrBlocks: ["0.0.0.0/0"],
+        securityGroups: [loadBalancerSecurityGroup.id],
+        //cidrBlocks: ["0.0.0.0/0"],
       },
       {
         protocol: "tcp", // for ssh
         fromPort: 22,
         toPort: 22,
-     //   cidrBlocks: ["0.0.0.0/0"],
-        securityGroups :[loadBalancerSecurityGroup.id],
+        //cidrBlocks: ["0.0.0.0/0"],
+        securityGroups: [loadBalancerSecurityGroup.id],
       },
     ],
     egress: [
       {
-          protocol: "-1", // -1 means all protocols
-          fromPort: 0,
-          toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
-          cidrBlocks: ["0.0.0.0/0"],
-      }
-  ]
-
+        protocol: "-1", // -1 means all protocols
+        fromPort: 0,
+        toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
+        cidrBlocks: ["0.0.0.0/0"],
+      },
+    ],
   });
 
+  // export const autoScalingGroupName = autoScalingGroup.name;
 
-// export const autoScalingGroupName = autoScalingGroup.name;
+/*   // Create DB security group
+  const dbSecurityGroup = new aws.ec2.SecurityGroup("db-security-group", {
+    description: "Database Security Group",
+    vpcId: vpc.id,
+  }); */
 
- 
-// Create DB security group
-const dbSecurityGroup = new aws.ec2.SecurityGroup("db-security-group", {
-  description: "Database Security Group",
-  vpcId: vpc.id,
-});
- 
-// Ingress rules
-const db_ingressRules = [
-  {
-    protocol: "tcp",
-    fromPort: 3306,
-    toPort: 3306,
-   // cidrBlocks: [cidrBlock_publicRouting],
-   //cidrBlocks: ["0.0.0.0/0"],
-
-  }
-];
- 
-db_ingressRules.forEach((rule, index) => {
- 
-  const db_ingressRule = new aws.ec2.SecurityGroupRule(`ingress-rule-4`, {
-    type: "ingress",
-    fromPort: rule.fromPort,
-    toPort: rule.toPort,
-    protocol: rule.protocol,
-    sourceSecurityGroupId: EC2SGroup.id,
-    securityGroupId: dbSecurityGroup.id,
-    //vpcId: vpc.id
-    vpcId:vpc.id,
-  });
- 
-});
- 
-// Create DB parameter group
-const dbParamGroup = new aws.rds.ParameterGroup("db-param-group", {
-  name: "cloud-assign6-params-group0",
-  family: "mysql8.0", // or postgresql9.6, etc
-  description: "Custom parameters for my RDS instance",
-  max_user_connections: 100,
-  parameter: [
+  // Ingress rules
+/*   const db_ingressRules = [
     {
-      name:'character_set_server',
-      value:'utf8'
+      protocol: "tcp",
+      fromPort: 3306,
+      toPort: 3306,
+      // cidrBlocks: [cidrBlock_publicRouting],
+      //cidrBlocks: ["0.0.0.0/0"],
     },
-    {
-      name: "collation_server",
-      value: "utf8_general_ci"
-    }
-  ]
-});
- 
-// Create RDS subnet group
-const dbSubnetGroup = new aws.rds.SubnetGroup("db-subnet-group", {
-  // subnetIds: privateSubnets.map(s => s.id)
-  subnetIds: subnetDetails.map(s => s.id)
- 
-});
- 
- 
-// Create RDS instance
-const dbInstance = new aws.rds.Instance("db-instance", {
-  engine: "mysql",
-  instanceClass: "db.t2.micro",
-  dbSubnetGroupName: dbSubnetGroup.name,
-  parameterGroupName: dbParamGroup.name,
-  allocatedStorage: 20,
-  multiAz: false,
-  dbInstanceIdentifier: "csye6225",
-  username: "csye6225",
-  password: new pulumi.secret("Vidish111"),
- 
-  publiclyAccessible: false,
-  dbName: "csye6225",
-  skipFinalSnapshot: true,
-  vpcSecurityGroupIds: [ dbSecurityGroup.id ]
+  ];
 
-});
-  
-// Create a Load Balancer
-const loadBalancer = new aws.lb.LoadBalancer("webAppLB", {
-    name: "csye6225-lb",
-    internal: false,
-    loadBalancerType: "application",
-    securityGroups: [loadBalancerSecurityGroup.id],
-    subnets: publicSubnetIds,
-    enableDeletionProtection: false,
-    tags: {
-      Application: "WebApp",
-    },
+  db_ingressRules.forEach((rule, index) => {
+    const db_ingressRule = new aws.ec2.SecurityGroupRule(`ingress-rule-4`, {
+      type: "ingress",
+      fromPort: rule.fromPort,
+      toPort: rule.toPort,
+      protocol: rule.protocol,
+      sourceSecurityGroupId: EC2SGroup.id,
+      securityGroupId: dbSecurityGroup.id,
+      //vpcId: vpc.id
+      vpcId: vpc.id,
+    });
+  }); */
+
+  const dbSecurityGroup = new aws.ec2.SecurityGroup("dbsecgrup", {
+    vpcId: vpc.id,
+    ingress: [
+      {
+        protocol: "tcp",
+        fromPort: 3306, // for web application port
+        toPort: 3306,
+        securityGroups:[EC2SGroup.id]
+      },
+    ],
+    egress: [
+      {
+        protocol: "-1", // -1 means all protocols
+        fromPort: 0,
+        toPort: 0, // Set both fromPort and toPort to 0 to allow all ports
+        cidrBlocks: ["0.0.0.0/0"],
+      },
+    ],
   });
 
-  
-// Create a Target Group
-const targetGroup = new aws.lb.TargetGroup("webAppTargetGroup", {
+  // Create DB parameter group
+  const dbParamGroup = new aws.rds.ParameterGroup("db-param-group", {
+    name: "cloud-assign6-params-group0",
+    family: "mysql8.0", // or postgresql9.6, etc
+    description: "Custom parameters for my RDS instance",
+    max_user_connections: 100,
+    parameter: [
+      {
+        name: "character_set_server",
+        value: "utf8",
+      },
+      {
+        name: "collation_server",
+        value: "utf8_general_ci",
+      },
+    ],
+  });
+
+  // Create RDS subnet group
+  const dbSubnetGroup = new aws.rds.SubnetGroup("db-subnet-group", {
+    subnetIds: privateSubnetsArray,
+ //   subnetIds: subnetDetails.id,
+  });
+
+  // Create RDS instance
+  const dbInstance = new aws.rds.Instance("db-instance", {
+    engine: "mysql",
+    instanceClass: "db.t2.micro",
+    dbSubnetGroupName: dbSubnetGroup.name,
+    parameterGroupName: dbParamGroup.name,
+    allocatedStorage: 20,
+    multiAz: false,
+    dbInstanceIdentifier: "csye6225",
+    username: "csye6225",
+    password: new pulumi.secret("Vidish111"),
+
+    publiclyAccessible: false,
+    dbName: "csye6225",
+    skipFinalSnapshot: true,
+    vpcSecurityGroupIds: [dbSecurityGroup.id],
+  });
+
+
+
+  // Create a Target Group
+  const targetGroup = new aws.lb.TargetGroup("webAppTargetGroup", {
     name: "csye6225-lb-tg",
     port: 3000,
     protocol: "HTTP",
@@ -284,22 +275,9 @@ const targetGroup = new aws.lb.TargetGroup("webAppTargetGroup", {
       interval: 30,
     },
   });
-  
-  // Create a Listener
-  const listener = new aws.lb.Listener("webAppListener", {
-    loadBalancerArn: loadBalancer.arn,
-    port: "80",
-    protocol: "HTTP",
-    defaultActions: [
-      {
-        type: "forward",
-        targetGroupArn: targetGroup.arn,
-      },
-    ],
-  });
-  
-  
-  const DB_HOST = pulumi.interpolate`${dbInstance.address}`; 
+
+
+  const DB_HOST = pulumi.interpolate`${dbInstance.address}`;
   const userData = pulumi.interpolate`#!/bin/bash
    
   # Define the path to the .env file
@@ -326,48 +304,56 @@ const targetGroup = new aws.lb.TargetGroup("webAppTargetGroup", {
   sudo systemctl restart unit 
   
   `;
-  const base64UserData = Buffer.from(userData).toString('base64');
+  const base64UserData = Buffer.from(userData).toString("base64");
   console.log(base64UserData);
-  
-  const hostedZoneName = "dev.networksturcture.pro"; // Replace with your actual domain name
-  const aRecordName = "networkstructures.pro"; // Replace with your actual domain name
-  
-  const zonePromise = aws.route53.getZone({ name: config.require('Arecord') }, { async: true });
-  
-  
-  
+
+  const hostedZoneName = "demo.networksturcture.pro"; 
+  const aRecordName = "networkstructures.pro"; 
+
+  const zonePromise = aws.route53.getZone(
+    { name: domainName },
+    { async: true }
+  );
+
   // Create an IAM role
   const ec2Role = new aws.iam.Role("EC2Role", {
-      assumeRolePolicy: JSON.stringify({
-          Version: "2012-10-17",
-          Statement: [{
-              Action: "sts:AssumeRole",
-              Effect: "Allow",
-              Principal: {
-                  Service: "ec2.amazonaws.com",
-              },
-          }],
-      }),
+    assumeRolePolicy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: {
+            Service: "ec2.amazonaws.com",
+          },
+        },
+      ],
+    }),
   });
-  
 
-// Attach the CloudWatchAgentServerPolicy to the IAM role
-const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("CloudWatchAgentServerPolicyAttachment", {
-  policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
-  role: ec2Role.name,
-});
-
+  // Attach the CloudWatchAgentServerPolicy to the IAM role
+  const cloudWatchAgentServerPolicyAttachment =
+    new aws.iam.RolePolicyAttachment("CloudWatchAgentServerPolicyAttachment", {
+      policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+      role: ec2Role.name,
+    });
 
   // Create an instance profile and associate the IAM role with it
   const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
     role: ec2Role.name,
   });
+
   
+
+  
+
+
   const launchtemplate = new aws.ec2.LaunchTemplate("launchtemplate", {
     name: "asg_launch_config",
-    imageId: "ami-04baf520d3c9a874b", // Replace with your AMI ID
+  //  imageId: "ami-09f19db08bc2df54e", 
+    imageId: "ami-0c93ddecad8641284",
     instanceType: "t2.micro",
-    keyName: keyPairName, // Replace with your key name
+    keyName: keyPairName, 
     disableApiTermination: false,
     dependsOn: [dbInstance],
     iamInstanceProfile: {
@@ -387,7 +373,7 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
       {
         associatePublicIpAddress: true,
         deleteOnTermination: true,
-        securityGroups: [EC2SGroup.id], // Replace with your security group ID
+        securityGroups: [EC2SGroup.id], 
       },
     ],
     tagSpecifications: [
@@ -398,11 +384,9 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
         },
       },
     ],
-    userData: userData.apply((data) =>
-      Buffer.from(data).toString("base64")
-    ),
+    userData: userData.apply((data) => Buffer.from(data).toString("base64")),
   });
-  
+
 
   // Create an Auto Scaling Group
   const asg = new aws.autoscaling.Group("asg", {
@@ -412,8 +396,9 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
     desiredCapacity: 1,
     forceDelete: true,
     defaultCooldown: 60,
-    vpcZoneIdentifiers: subnetDetails,
+    vpcZoneIdentifiers: publicSubnetsArray,
     instanceProfile: instanceProfile.name,
+    healthCheckGracePeriod: 300,
     tags: [
       {
         key: "Name",
@@ -427,7 +412,39 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
     },
     dependsOn: [targetGroup],
     targetGroupArns: [targetGroup.arn],
+
   });
+
+    // Create a Load Balancer
+    const loadBalancer = new aws.lb.LoadBalancer("webAppLB", {
+      name: "csye6225-lb",
+      internal: false,
+      loadBalancerType: "application",
+      securityGroups: [loadBalancerSecurityGroup.id],
+      subnets: publicSubnetsArray,
+      enableDeletionProtection: false,
+      tags: {
+        Application: "WebApp",
+      },
+    },{dependsOn: [launchtemplate]});
+
+      // Create a Listener
+  const listener = new aws.lb.Listener("webAppListener", {
+    loadBalancerArn: loadBalancer.arn,
+    port: 80,
+    protocol: "HTTP",
+    defaultActions: [
+      {
+        type: "forward",
+        targetGroupArn: targetGroup.arn,
+      },
+    ],
+  },{dependsOn: [targetGroup]});
+
+
+
+
+
   
   // Create Scaling Policies
   const scaleUpPolicy = new aws.autoscaling.Policy("scaleUpPolicy", {
@@ -440,7 +457,7 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
     policyType: "SimpleScaling",
     scalingTargetId: asg.id,
   });
-  
+
   const scaleDownPolicy = new aws.autoscaling.Policy("scaleDownPolicy", {
     autoscalingGroupName: asg.name,
     scalingAdjustment: -1,
@@ -453,34 +470,314 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
   });
 
   const cpuUtilizationAlarmHigh = new aws.cloudwatch.MetricAlarm(
-
     "cpuUtilizationAlarmHigh",
-  
+
     {
-  
       comparisonOperator: "GreaterThanThreshold",
-  
+
       evaluationPeriods: 1,
-  
+
       metricName: "CPUUtilization",
-  
+
       namespace: "AWS/EC2",
-  
+
       period: 60,
-  
+
       threshold: 5,
-  
+
       statistic: "Average",
-  
+
       alarmActions: [scaleUpPolicy.arn],
-  
+
       dimensions: { AutoScalingGroupName: asg.name },
-  
     }
-  
   );
-  
-})
+
+  const cpuUtilizationAlarmLow = new aws.cloudwatch.MetricAlarm(
+    "cpuUtilizationAlarmLow",
+
+    {
+      comparisonOperator: "LessThanThreshold",
+
+      evaluationPeriods: 1,
+
+      metricName: "CPUUtilization",
+
+      namespace: "AWS/EC2",
+
+      period: 60,
+
+      threshold: 3,
+
+      statistic: "Average",
+
+      alarmActions: [scaleDownPolicy.arn],
+
+      dimensions: { AutoScalingGroupName: asg.name },
+    }
+  );
+  const hostedZone = aws.route53.getZone({ name: domainName });
+  console.log(
+    "53 records the loadbalancer",
+    loadBalancer,
+    loadBalancer.dnsName
+  );
+  new aws.route53.Record(`Arecord`, {
+    name: domainName,
+    type: "A",
+    zoneId: hostedZone.then((zone) => zone.zoneId),
+    aliases: [
+      {
+        name: loadBalancer.dnsName,
+        zoneId: loadBalancer.zoneId,
+        evaluateTargetHealth: true,
+      },
+    ],
+  });
+});
+
+
+
+// Create an IAM role for the Lambda function
+const lambdaRole = new aws.iam.Role("lambdaRole", {
+    assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: {
+                Service: "lambda.amazonaws.com",
+            },
+        }],
+    }),
+});
+
+// Attach the AWSLambdaBasicExecutionRole policy to the IAM role
+const lambdaBasicExecutionPolicyAttachment = new aws.iam.RolePolicyAttachment("lambdaBasicExecutionPolicy", {
+    policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+    role: lambdaRole,
+});
+
+export const lambdaRoleName = lambdaRole.name;
+
+
+
+
+// Create an SNS topic
+const snsTopic = new aws.sns.Topic("my-sns-topic");
+
+const role = new aws.iam.Role("snsPublishRole", {
+  assumeRolePolicy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: {
+              Service: "sns.amazonaws.com",
+          },
+      }],
+  }),
+});
+
+
+const snsPublishPolicy = new aws.iam.Policy("SNSPublishPolicy", {
+  policy: {
+      Version: "2012-10-17",
+      Statement: [{
+          Effect: "Allow",
+          Action: "sns:Publish",
+          Resource: snsTopic.arn,
+      }],
+  },
+  roles: [role.name],
+});
+
+const snsPublishPolicyAttachment = new aws.iam.RolePolicyAttachment("SNSPublishPolicyAttachment", {
+  role: role.name,
+  policyArn: snsPublishPolicy.arn,
+});
+
+
+
+
+// Create a Google Cloud Storage bucket
+// const bucket = new gcp.storage.Bucket("my-storage-bucket", {
+//   name: "vidish_cloud_bucket",
+//   location: "US",
+//   project: "devproject-406403",
+
+// });
+
+// export const bucketName = bucket.name;
+// export const serviceAccountEmail = serviceAccount.email;
+// export const privateKey = key.privateKey;
+
+
+
+// Create a Google Service Account
+const serviceAccount = new gcp.serviceaccount.Account("my-service-account", {
+    accountId: "my-service-account",
+    displayName: "My Service Account",
+    project: "devproject-406403",
+});
+
+// Create Access Keys for the Service Account
+const key = new gcp.serviceaccount.Key("my-service-account-key", {
+    serviceAccountId: serviceAccount.name,
+    account: serviceAccount.name,
+    keyAlgorithm: "KEY_ALG_RSA_2048",
+});
+
+
+// Create a Google Cloud Storage bucket
+const bucket = new gcp.storage.Bucket("my-storage-bucket", {
+  name: "vidish_cloud_bucket",
+  location: "US",
+  project: "devproject-406403",
+
+});
+
+
+// IAM binding
+const bucketIamBinding = new gcp.storage.BucketIAMBinding("binding", {
+  bucket: bucket.name,
+  project: "devproject", // Replace with your specific project name
+  role: "roles/storage.admin",
+  members: [pulumi.interpolate`serviceAccount:${serviceAccount.email}`],
+});
+
+
+
+// Create a Lambda function
+const lambdaFunction = new aws.lambda.Function("my-lambda-function", {
+    runtime: 'nodejs18.x',
+    handler: "index.handler",
+    packageType: 'Zip',
+     
+    code: new pulumi.asset.AssetArchive({
+        ".": new pulumi.asset.FileArchive("C:\\Users\\vidis\\Documents\\Serverless\\Serverless.zip"),
+    }),
+    role: lambdaRole.arn,
+    environment: {
+        variables: {
+            // Add any environment variables if needed
+            SNS_TOPIC_ARN: snsTopic.arn,
+            mailgun_api_key: mailgun_api_key,
+            domainName: domainName,
+
+
+        },
+    },
+    // Add any other Lambda function configuration as needed
+});
+
+
+
+
+
+// Grant permissions for Lambda to be invoked by SNS
+const lambdaPermission = new aws.lambda.Permission("my-lambda-permission", {
+    action: "lambda:InvokeFunction",
+    function: lambdaFunction,
+    principal: "sns.amazonaws.com",
+    sourceArn: snsTopic.arn,
+});
+
+// Subscribe Lambda function to SNS topic
+const snsSubscription = new aws.sns.TopicSubscription("my-sns-subscription", {
+    protocol: "lambda",
+    endpoint: lambdaFunction.arn,
+    topic: snsTopic.arn,
+});
+
+// Export the SNS topic ARN for reference
+export const snsTopicArn = snsTopic.arn;
+
+
+// Create an IAM role for CloudWatch Agent
+const cloudWatchAgentRole = new aws.iam.Role("cloudWatchAgentRole", {
+    assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: {
+                Service: "ec2.amazonaws.com",
+            },
+        }],
+    }),
+});
+
+// Attach the AWS-managed policy for CloudWatch Agent to the IAM role
+const cloudWatchAgentPolicyAttachment = new aws.iam.RolePolicyAttachment("cloudWatchAgentPolicyAttachment", {
+    policyArn: "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM",
+    role: cloudWatchAgentRole.name,
+});
+
+export const cloudWatchAgentRoleName = cloudWatchAgentRole.name;
+
+// Create a DynamoDB table
+const dynamoDBTable = new aws.dynamodb.Table("dynamoDBTable", {
+  name: "Csye6225_Demo_DynamoDB",
+  attributes: [
+    {
+      name: "id",
+      type: "S",
+    },
+    {
+      name: "status",
+      type: "S",
+    },
+    {
+      name: "timestamp",
+      type: "S",
+    },
+  ],
+  hashKey: "id",
+  rangeKey: "status",
+  readCapacity: 5,
+  writeCapacity: 5,
+  globalSecondaryIndexes: [
+    {
+      name: "TimestampIndex",
+      hashKey: "timestamp",
+      rangeKey: "id",
+      projectionType: "ALL",
+      readCapacity: 5,
+      writeCapacity: 5,
+    },
+  ],
+});
+
+// Create an IAM policy for DynamoDB access
+const dynamoDBPolicy = new aws.iam.Policy("DynamoDBAccessPolicy", {
+  policy: {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Effect: "Allow",
+        Action: [
+          "dynamodb:PutItem",
+          "dynamodb:GetItem",
+          "dynamodb:Query", // Add other necessary actions
+        ],
+        Resource: dynamoDBTable.arn,
+      },
+    ],
+  },
+});
+
+// Attach the DynamoDB policy to the Lambda execution role
+const dynamoDBPolicyAttachment = new aws.iam.PolicyAttachment(
+  "DynamoDBPolicyAttachment",
+  {
+    policyArn: dynamoDBPolicy.arn,
+    roles: [lambdaRole.name], // Assuming lambdaRole is the execution role for your Lambda function
+    dependsOn: [dynamoDBTable],
+  }
+);
+
+
 
 
 
@@ -495,13 +792,8 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
 //     role: ec2Role.name,
 // });
 
-
-
 // Export the IAM role name for future reference
 // export const ec2RoleName = ec2Role.name;
-
-
-
 
 // Export the IAM role name for use with EC2 instances
 // const cloudWatchAgentRoleName = cloudWatchAgentRole.name;
@@ -538,21 +830,19 @@ const cloudWatchAgentServerPolicyAttachment = new aws.iam.RolePolicyAttachment("
 })
 
 */
-// zonePromise.then(zone=>{
-//   const aRecord = new aws.route53.Record("a-record", {
-//     name: config.require('Arecord'),
-//     type: "A",
-//     zoneId: zone.zoneId,
-//     records: [applicationEc2Instance.publicIp], 
-//     ttl: 60, 
-  
-// }, 
-//    {dependsOn: [applicationEc2Instance]}
-// );
-// });
+//  zonePromise.then(zone=>{
+//    const aRecord = new aws.route53.Record("a-record", {
+//      name: config.require('Arecord'),
+//      type: "A",
+//      zoneId: zone.zoneId,
+//      records: [loadBalancer.publicIp],
+//      ttl: 60,
+
+//  },
+//     {dependsOn: [loadBalancer]}
+//  );
+//  });
 
 //});
 
 // export const vpcId = vpc.id;
-
-
