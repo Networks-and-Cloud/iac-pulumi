@@ -3,4 +3,8 @@ config:
   aws:region: us-east-1
   app:VPCCidrBlock: 10.0.0.0/16
   app:destinationCidrBlock: 0.0.0.0/0
-  webApp:keyPairName: vidish_key_app
+  webApp:keyPairName: vidish_key
+  webApp:Arecord: networkstructures.pro
+  mailgun_api_key: 8894b0dfdd34b44f1ad1452f73197b88-30b58138-d2904982
+  gcp:region: us-east-1
+  domainName: networkstructures.pro
