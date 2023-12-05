@@ -15,6 +15,9 @@ import * as gcp from "@pulumi/gcp";
 const keyPairName = webAppConfig.get("keyPairName");
 const domainName = webAppConfig.get("Arecord");
 
+//const mailgun_api_key: "8894b0dfdd34b44f1ad1452f73197b88-30b58138-d2904982";
+domainName: "networkstructures.pro";
+
 console.log(`The keyName is: ${keyPairName}`);
 
 // Create a new VPC
@@ -22,6 +25,46 @@ const vpc = new aws.ec2.Vpc("webappVPC", {
   cidrBlock: config.get("cidrBlock"),
 });
 console.log(vpc.id);
+
+// Create a Google Cloud Storage bucket
+const bucket = new gcp.storage.Bucket("my-storage-bucket", {
+  name: "vidish_cloud_bucket",
+  location: "US",
+  project: "devproject-406403",
+  
+  });
+  
+// Create an SNS topic
+const snsTopic = new aws.sns.Topic("my-sns-topic");
+
+// Create an IAM role for the Lambda function
+const lambdaRole = new aws.iam.Role("lambdaRole", {
+  assumeRolePolicy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: {
+              Service: "lambda.amazonaws.com",
+          },
+      }],
+  }),
+});
+
+
+const lambdaRolesPolicyArn = [
+  "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess",
+  "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+  "arn:aws:iam::aws:policy/AWSLambda_FullAccess",
+  "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+];
+
+// Attach the AWSLambdaBasicExecutionRole policy to the IAM role
+const lambdaFullAccessPolicyAttachment = new aws.iam.RolePolicyAttachment("lambdaBasicExecutionPolicy", {
+  policyArn: "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
+  role: lambdaRole,
+});
+
 
 
   // Create an Internet Gateway and attach it to the VPC
@@ -35,7 +78,7 @@ const privateSubnetsArray=[];
 aws.getAvailabilityZones({ state: "available" }).then((response) => {
   const allZones = response.names;
 
-  // Determine the number of subnets to create based on the number of availability zones
+  //  number of subnets to create based on the number of availability zones
   const numSubnetsToCreate = Math.min(3, allZones.length);
 
   const selectedZones = allZones.slice(0, numSubnetsToCreate);
@@ -278,6 +321,110 @@ aws.getAvailabilityZones({ state: "available" }).then((response) => {
 
 
   const DB_HOST = pulumi.interpolate`${dbInstance.address}`;
+
+  
+
+
+
+const role = new aws.iam.Role("snsPublishRole", {
+  assumeRolePolicy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+          Action: "sts:AssumeRole",
+          Effect: "Allow",
+          Principal: {
+              Service: "sns.amazonaws.com",
+          },
+      }],
+  }),
+});
+
+
+const snsPublishPolicy = new aws.iam.Policy("SNSPublishPolicy", {
+  policy: {
+      Version: "2012-10-17",
+      Statement: [{
+          Effect: "Allow",
+          Action: "sns:Publish",
+          Resource: snsTopic.arn,
+      }],
+  },
+  roles: [role.name],
+});
+
+
+
+// Create a Google Service Account
+const serviceAccount = new gcp.serviceaccount.Account("my-service-account", {
+  accountId: "my-service-account",
+  displayName: "My Service Account",
+  project: "devproject-406403",
+});
+
+// Create Access Keys for the Service Account
+const key = new gcp.serviceaccount.Key("my-service-account-key", {
+  serviceAccountId: serviceAccount.name,
+  account: serviceAccount.name,
+  keyAlgorithm: "KEY_ALG_RSA_2048",
+});
+
+
+
+
+// IAM binding
+const bucketIamBinding = new gcp.storage.BucketIAMBinding("binding", {
+bucket: bucket.name,
+project: "devproject", // Replace with your specific project name
+role: "roles/storage.admin",
+members: [pulumi.interpolate`serviceAccount:${serviceAccount.email}`],
+});
+
+
+
+// Create a Lambda function
+const lambdaFunction = new aws.lambda.Function("my-lambda-function", {
+  runtime: 'nodejs18.x',
+  handler: "index.handler",
+  packageType: 'Zip',
+   
+  code: new pulumi.asset.AssetArchive({
+      ".": new pulumi.asset.FileArchive("C:\\Users\\vidis\\Documents\\Serverless\\serverless.zip"),
+  }),
+  role: lambdaRole.arn,
+  environment: {
+      variables: {
+          // Adding environment variables 
+      //    snsTopic: snsTopic.arn,
+          mailgun_api_key: mailgun_api_key,
+          key: key.privateKey,  //google service account key
+          domainName: domainName,
+          bucket: bucket.name,
+          dynamoDBTable: dynamoDBTable.name,
+
+      },
+  },
+
+});
+
+
+// Subscribe Lambda function to SNS topic
+const snsSubscription = new aws.sns.TopicSubscription("my-sns-subscription", {
+protocol: "lambda",
+endpoint: lambdaFunction.arn,
+topic: snsTopic.arn,
+});
+
+
+
+// Grant permissions for Lambda to be invoked by SNS
+const lambdaPermission = new aws.lambda.Permission("my-lambda-permission", {
+  action: "lambda:InvokeFunction",
+  function: lambdaFunction,
+  principal: "sns.amazonaws.com",
+  sourceArn: snsTopic.arn,
+});
+
+//userData
   const userData = pulumi.interpolate`#!/bin/bash
    
   # Define the path to the .env file
@@ -292,6 +439,8 @@ aws.getAvailabilityZones({ state: "available" }).then((response) => {
   # Create the .env file
   sudo touch "$envFile"
   
+  echo "snsTopic='${snsTopic.arn}'" | sudo tee -a "$envFile"
+
   echo "MYSQL_DB='${dbInstance.dbName}'" | sudo tee -a "$envFile"
   echo "MYSQL_HOST='${DB_HOST}'" | sudo tee -a "$envFile"
   echo "MYSQL_USER='${dbInstance.username}'" | sudo tee -a "$envFile"
@@ -331,6 +480,12 @@ aws.getAvailabilityZones({ state: "available" }).then((response) => {
     }),
   });
 
+  const snsPublishPolicyAttachment = new aws.iam.RolePolicyAttachment("SNSPublishPolicyAttachment", {
+    role: ec2Role.name,
+    policyArn: snsPublishPolicy.arn,
+  });
+  
+
   // Attach the CloudWatchAgentServerPolicy to the IAM role
   const cloudWatchAgentServerPolicyAttachment =
     new aws.iam.RolePolicyAttachment("CloudWatchAgentServerPolicyAttachment", {
@@ -342,16 +497,15 @@ aws.getAvailabilityZones({ state: "available" }).then((response) => {
   const instanceProfile = new aws.iam.InstanceProfile("EC2InstanceProfile", {
     role: ec2Role.name,
   });
-
   
-
-  
-
 
   const launchtemplate = new aws.ec2.LaunchTemplate("launchtemplate", {
     name: "asg_launch_config",
-  //  imageId: "ami-09f19db08bc2df54e", 
-    imageId: "ami-0c93ddecad8641284",
+  
+   // imageId: "ami-0c93ddecad8641284",
+  //  imageId: "ami-07c3f79345556bd16",
+  //  imageId: "ami-06234cdb3fae99f2a",
+    imageId: "ami-00e08101c81dd234f",
     instanceType: "t2.micro",
     keyName: keyPairName, 
     disableApiTermination: false,
@@ -431,18 +585,16 @@ aws.getAvailabilityZones({ state: "available" }).then((response) => {
       // Create a Listener
   const listener = new aws.lb.Listener("webAppListener", {
     loadBalancerArn: loadBalancer.arn,
-    port: 80,
-    protocol: "HTTP",
+    port: 443,
+    protocol: "HTTPS",
     defaultActions: [
       {
         type: "forward",
         targetGroupArn: targetGroup.arn,
       },
     ],
+    certificateArn: "arn:aws:acm:us-east-1:657518575690:certificate/c4b60dba-9175-4816-9097-405aa917a4a8",
   },{dependsOn: [targetGroup]});
-
-
-
 
 
   
@@ -538,64 +690,11 @@ aws.getAvailabilityZones({ state: "available" }).then((response) => {
 
 
 
-// Create an IAM role for the Lambda function
-const lambdaRole = new aws.iam.Role("lambdaRole", {
-    assumeRolePolicy: JSON.stringify({
-        Version: "2012-10-17",
-        Statement: [{
-            Action: "sts:AssumeRole",
-            Effect: "Allow",
-            Principal: {
-                Service: "lambda.amazonaws.com",
-            },
-        }],
-    }),
-});
 
-// Attach the AWSLambdaBasicExecutionRole policy to the IAM role
-const lambdaBasicExecutionPolicyAttachment = new aws.iam.RolePolicyAttachment("lambdaBasicExecutionPolicy", {
-    policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
-    role: lambdaRole,
-});
+
+
 
 export const lambdaRoleName = lambdaRole.name;
-
-
-
-
-// Create an SNS topic
-const snsTopic = new aws.sns.Topic("my-sns-topic");
-
-const role = new aws.iam.Role("snsPublishRole", {
-  assumeRolePolicy: JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [{
-          Action: "sts:AssumeRole",
-          Effect: "Allow",
-          Principal: {
-              Service: "sns.amazonaws.com",
-          },
-      }],
-  }),
-});
-
-
-const snsPublishPolicy = new aws.iam.Policy("SNSPublishPolicy", {
-  policy: {
-      Version: "2012-10-17",
-      Statement: [{
-          Effect: "Allow",
-          Action: "sns:Publish",
-          Resource: snsTopic.arn,
-      }],
-  },
-  roles: [role.name],
-});
-
-const snsPublishPolicyAttachment = new aws.iam.RolePolicyAttachment("SNSPublishPolicyAttachment", {
-  role: role.name,
-  policyArn: snsPublishPolicy.arn,
-});
 
 
 
@@ -613,108 +712,6 @@ const snsPublishPolicyAttachment = new aws.iam.RolePolicyAttachment("SNSPublishP
 // export const privateKey = key.privateKey;
 
 
-
-// Create a Google Service Account
-const serviceAccount = new gcp.serviceaccount.Account("my-service-account", {
-    accountId: "my-service-account",
-    displayName: "My Service Account",
-    project: "devproject-406403",
-});
-
-// Create Access Keys for the Service Account
-const key = new gcp.serviceaccount.Key("my-service-account-key", {
-    serviceAccountId: serviceAccount.name,
-    account: serviceAccount.name,
-    keyAlgorithm: "KEY_ALG_RSA_2048",
-});
-
-
-// Create a Google Cloud Storage bucket
-const bucket = new gcp.storage.Bucket("my-storage-bucket", {
-  name: "vidish_cloud_bucket",
-  location: "US",
-  project: "devproject-406403",
-
-});
-
-
-// IAM binding
-const bucketIamBinding = new gcp.storage.BucketIAMBinding("binding", {
-  bucket: bucket.name,
-  project: "devproject", // Replace with your specific project name
-  role: "roles/storage.admin",
-  members: [pulumi.interpolate`serviceAccount:${serviceAccount.email}`],
-});
-
-
-
-// Create a Lambda function
-const lambdaFunction = new aws.lambda.Function("my-lambda-function", {
-    runtime: 'nodejs18.x',
-    handler: "index.handler",
-    packageType: 'Zip',
-     
-    code: new pulumi.asset.AssetArchive({
-        ".": new pulumi.asset.FileArchive("C:\\Users\\vidis\\Documents\\Serverless\\Serverless.zip"),
-    }),
-    role: lambdaRole.arn,
-    environment: {
-        variables: {
-            // Add any environment variables if needed
-            SNS_TOPIC_ARN: snsTopic.arn,
-            mailgun_api_key: mailgun_api_key,
-            domainName: domainName,
-
-
-        },
-    },
-    // Add any other Lambda function configuration as needed
-});
-
-
-
-
-
-// Grant permissions for Lambda to be invoked by SNS
-const lambdaPermission = new aws.lambda.Permission("my-lambda-permission", {
-    action: "lambda:InvokeFunction",
-    function: lambdaFunction,
-    principal: "sns.amazonaws.com",
-    sourceArn: snsTopic.arn,
-});
-
-// Subscribe Lambda function to SNS topic
-const snsSubscription = new aws.sns.TopicSubscription("my-sns-subscription", {
-    protocol: "lambda",
-    endpoint: lambdaFunction.arn,
-    topic: snsTopic.arn,
-});
-
-// Export the SNS topic ARN for reference
-export const snsTopicArn = snsTopic.arn;
-
-
-// Create an IAM role for CloudWatch Agent
-const cloudWatchAgentRole = new aws.iam.Role("cloudWatchAgentRole", {
-    assumeRolePolicy: JSON.stringify({
-        Version: "2012-10-17",
-        Statement: [{
-            Action: "sts:AssumeRole",
-            Effect: "Allow",
-            Principal: {
-                Service: "ec2.amazonaws.com",
-            },
-        }],
-    }),
-});
-
-// Attach the AWS-managed policy for CloudWatch Agent to the IAM role
-const cloudWatchAgentPolicyAttachment = new aws.iam.RolePolicyAttachment("cloudWatchAgentPolicyAttachment", {
-    policyArn: "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM",
-    role: cloudWatchAgentRole.name,
-});
-
-export const cloudWatchAgentRoleName = cloudWatchAgentRole.name;
 
 // Create a DynamoDB table
 const dynamoDBTable = new aws.dynamodb.Table("dynamoDBTable", {
@@ -768,14 +765,51 @@ const dynamoDBPolicy = new aws.iam.Policy("DynamoDBAccessPolicy", {
 });
 
 // Attach the DynamoDB policy to the Lambda execution role
-const dynamoDBPolicyAttachment = new aws.iam.PolicyAttachment(
-  "DynamoDBPolicyAttachment",
-  {
-    policyArn: dynamoDBPolicy.arn,
-    roles: [lambdaRole.name], // Assuming lambdaRole is the execution role for your Lambda function
-    dependsOn: [dynamoDBTable],
-  }
-);
+// const dynamoDBPolicyAttachment = new aws.iam.PolicyAttachment(
+//   "DynamoDBPolicyAttachment",
+//   {
+//     policyArn: dynamoDBPolicy.arn,
+//     role: [lambdaRole.name], // Assuming lambdaRole is the execution role for your Lambda function
+//     dependsOn: [dynamoDBTable],
+//   }
+// );
+
+// Attach the DynamoDB policy to the Lambda execution role
+const dynamoDBPolicyAttachment = new aws.iam.RolePolicyAttachment("DynamoDBPolicyAttachment", {
+  policyArn: dynamoDBPolicy.arn,
+  role: lambdaRole.name,
+});
+
+
+
+
+// Export the SNS topic ARN for reference
+//export const snsTopicArn = snsTopic.arn;
+
+
+// Create an IAM role for CloudWatch Agent
+const cloudWatchAgentRole = new aws.iam.Role("cloudWatchAgentRole", {
+    assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+            Action: "sts:AssumeRole",
+            Effect: "Allow",
+            Principal: {
+                Service: "ec2.amazonaws.com",
+            },
+        }],
+    }),
+});
+
+// Attach the AWS-managed policy for CloudWatch Agent to the IAM role
+const cloudWatchAgentPolicyAttachment = new aws.iam.RolePolicyAttachment("cloudWatchAgentPolicyAttachment", {
+    policyArn: "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM",
+    role: lambdaRole.name,
+  //  lambdaRole: cloudWatchAgentRole.name,
+});
+
+export const cloudWatchAgentRoleName = cloudWatchAgentRole.name;
+
 
 
 
