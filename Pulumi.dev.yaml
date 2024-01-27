@@ -3,12 +3,11 @@ config:
   aws:region: us-east-1
   cidrBlock: 10.0.0.0/16
   webApp:destinationCidrBlock: 0.0.0.0/0
-  webApp:keyPairName: vidish_key
+  webApp:keyPairName: vidish_key_app
   webApp:Arecord: dev.networkstructures.pro
   db_dialect: mysql
   mysql_port: 3306
-  mailgun_api_key: 8894b0dfdd34b44f1ad1452f73197b88-30b58138-d2904982
   gcp:project: devproject
   gcp:region: us-east-1
   domainName: dev.networkstructures.pro
-  
+  certificateArn: arn:aws:acm:us-east-1:185549876317:certificate/db254b89-8e1a-4707-838b-c1e1b9df0534
