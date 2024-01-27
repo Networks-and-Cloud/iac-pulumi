@@ -7,7 +7,7 @@ config:
   db_dialect: mysql
   mysql_port: 3306
   webApp:Arecord: demo.networkstructures.pro
-  mailgun_api_key: 8894b0dfdd34b44f1ad1452f73197b88-30b58138-d2904982
   gcp:project: demoproject
   gcp:region: us-east-1
   domainName: demo.networkstructures.pro
+  certificateArn: arn:aws:acm:us-east-1:657518575690:certificate/c4b60dba-9175-4816-9097-405aa917a4a8

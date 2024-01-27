@@ -11,7 +11,7 @@
         "@pulumi/gcp": "^7.2.1",
         "@pulumi/pulumi": "^3.0.0",
         "ip": "^1.1.8",
-        "mailgun-js": "^0.22.0",
+        "mailgun-js": "^0.6.9",
         "subnet-cidr-calculator": "^1.0.12"
     }
 }
