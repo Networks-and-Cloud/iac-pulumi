@@ -16,7 +16,7 @@ const certificateArn = config.require("certificateArn");
 const keyPairName = webAppConfig.get("keyPairName");
 const domainName = webAppConfig.get("Arecord");
 
-//const mailgun_api_key: "8894b0dfdd34b44f1ad1452f73197b88-30b58138-d2904982";
+
 domainName: "networkstructures.pro";
 
 console.log(`The keyName is: ${keyPairName}`);
